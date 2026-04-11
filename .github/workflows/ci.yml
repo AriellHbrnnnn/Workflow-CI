@@ -30,12 +30,12 @@ jobs:
 
     - name: Run mlflow project
       run: |
-        mlflow run MLProject --experiment-name "CI_Retraining" --no-conda
+        mlflow run MLProject --experiment-name "CI_Retraining" --env-manager local
       
     - name: Get latest MLflow run_id
       id: get_run_id
       run: |
-        RUN_ID=$(ls mlruns/0 -t | head -n 1)
+        RUN_ID=$(ls mlruns/0 -t | grep -v "meta.yaml" | head -n 1)
         echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
 
     - name: Build Docker Model
