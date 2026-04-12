@@ -15,50 +15,129 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
+    # ------------------------------------------------------------------
+    # 1. Checkout repo
+    # ------------------------------------------------------------------
+    - name: Run actions/checkout@v3
       uses: actions/checkout@v3
 
+    # ------------------------------------------------------------------
+    # 2. Setup Python
+    # ------------------------------------------------------------------
     - name: Set up Python 3.12.7
       uses: actions/setup-python@v4
       with:
         python-version: '3.12.7'
 
+    # ------------------------------------------------------------------
+    # 3. Check Env  ← wajib ada untuk skilled & advanced
+    # ------------------------------------------------------------------
+    - name: Check Env
+      run: |
+        python --version
+        pip --version
+        echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
+
+    # ------------------------------------------------------------------
+    # 4. Install dependencies (mlflow + training deps)
+    # ------------------------------------------------------------------
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install mlflow==2.19.0 pandas scikit-learn
+        pip install mlflow==2.19.0 pandas scikit-learn cloudpickle
 
+    # ------------------------------------------------------------------
+    # 5. Run mlflow project
+    # ------------------------------------------------------------------
     - name: Run mlflow project
       run: |
         mlflow run MLProject --experiment-name "CI_Retraining" --env-manager local
-      
+
+    # ------------------------------------------------------------------
+    # 6. Get latest MLflow run_id  ← wajib ada untuk advanced
+    # ------------------------------------------------------------------
     - name: Get latest MLflow run_id
       id: get_run_id
       run: |
-        # Mengambil RUN_ID menggunakan script python agar lebih akurat
-        RUN_ID=$(python -c "import mlflow; print(mlflow.search_runs(experiment_names=['CI_Retraining']).iloc[0]['run_id'])")
+        RUN_ID=$(python -c "
+        import mlflow
+        runs = mlflow.search_runs(experiment_names=['CI_Retraining'])
+        print(runs.iloc[0]['run_id'])
+        ")
         echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
         echo "Found Run ID: $RUN_ID"
 
+    # ------------------------------------------------------------------
+    # 7. Install Python dependencies untuk upload  ← wajib skilled/advanced
+    # ------------------------------------------------------------------
+    - name: Install Python dependencies
+      run: |
+        pip install PyGithub
+
+    # ------------------------------------------------------------------
+    # 8. Upload to GitHub  ← wajib skilled/advanced
+    #    Menyimpan seluruh mlruns (artefak MLflow) ke branch repository
+    # ------------------------------------------------------------------
+    - name: Upload to GitHub
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # Buat folder artefak & salin isi mlruns
+        mkdir -p mlflow_artifacts
+        cp -r mlruns/ mlflow_artifacts/
+
+        # Tambahkan ke index dan commit (skip jika tidak ada perubahan)
+        git add mlflow_artifacts/
+        git diff --cached --quiet && echo "No changes to commit" || \
+          (git commit -m "ci: upload MLflow artifacts [run_id=${{ env.RUN_ID }}]" && \
+           git push origin HEAD:${{ github.ref_name }})
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # ------------------------------------------------------------------
+    # 9. Build Docker Image dari model MLflow  ← wajib advanced
+    # ------------------------------------------------------------------
     - name: Build Docker Model
       run: |
-        # Menggunakan mlflow models build-docker dengan RUN ID yang benar
-        mlflow models build-docker -m runs:/${{ env.RUN_ID }}/model -n arielhebron/credit-risk-model:latest --install-mlflow
+        mlflow models build-docker \
+          -m "runs:/${{ env.RUN_ID }}/model" \
+          -n "${{ secrets.DOCKERHUB_USERNAME }}/credit-risk-model:latest" \
+          --install-mlflow
 
+    # ------------------------------------------------------------------
+    # 10. Login ke Docker Hub
+    # ------------------------------------------------------------------
     - name: Log in to Docker Hub
       uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+    # ------------------------------------------------------------------
+    # 11. Tag Docker Image dengan SHA commit
+    # ------------------------------------------------------------------
     - name: Tag Docker Image
       run: |
-        docker tag arielhebron/credit-risk-model:latest arielhebron/credit-risk-model:${{ github.sha }}
+        docker tag \
+          "${{ secrets.DOCKERHUB_USERNAME }}/credit-risk-model:latest" \
+          "${{ secrets.DOCKERHUB_USERNAME }}/credit-risk-model:${{ github.sha }}"
 
+    # ------------------------------------------------------------------
+    # 12. Push Docker Image ke Docker Hub
+    # ------------------------------------------------------------------
     - name: Push Docker Image
       run: |
-        docker push arielhebron/credit-risk-model:latest
-        docker push arielhebron/credit-risk-model:${{ github.sha }}
+        docker push "${{ secrets.DOCKERHUB_USERNAME }}/credit-risk-model:latest"
+        docker push "${{ secrets.DOCKERHUB_USERNAME }}/credit-risk-model:${{ github.sha }}"
 
+    # ------------------------------------------------------------------
+    # 13. Complete
+    # ------------------------------------------------------------------
     - name: Complete job
-      run: echo "Workflow CI Complete"
+      run: |
+        echo "=============================="
+        echo " Workflow CI selesai!"
+        echo " Run ID  : ${{ env.RUN_ID }}"
+        echo " Image   : ${{ secrets.DOCKERHUB_USERNAME }}/credit-risk-model:latest"
+        echo "=============================="
