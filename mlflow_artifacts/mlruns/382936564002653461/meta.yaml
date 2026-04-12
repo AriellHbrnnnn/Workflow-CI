@@ -1,0 +1,6 @@
+artifact_location: file:///home/runner/work/Workflow-CI/Workflow-CI/mlruns/382936564002653461
+creation_time: 1775974083570
+experiment_id: '382936564002653461'
+last_update_time: 1775974083570
+lifecycle_stage: active
+name: CI_Retraining
